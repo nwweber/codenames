@@ -1,6 +1,7 @@
 """
 just playing around a bit
 """
+import csv
 
 import pandas as pd
 import numpy as np
@@ -11,13 +12,16 @@ NDARR = np.ndarray
 
 
 def main() -> None:
-    glove_path: str = './embeddings/glove/6b/glove.6B.50d.txt'
+    glove_path: str = './embeddings/glove/6b/glove.6B.300d.txt'
     glove: PDF = pd.read_csv(
         filepath_or_buffer=glove_path,
         delim_whitespace=True,
-        engine='python',
+        engine='c',
         header=None,
-        index_col=0
+        index_col=0,
+        # nrows=100000,
+        quoting=csv.QUOTE_NONE,
+        dtype={0: object}.update({i: np.float16 for i in range(1, 301)})
     )
 
     wordlist_ids = [
@@ -45,7 +49,7 @@ def main() -> None:
     codewords_l: list = list(codewords)
     rand_state = np.random.RandomState(0)
 
-    for i in range(10):
+    for i in range(3):
         # make some riddles
         riddle: NDARR = rand_state.choice(codewords_l, 3, replace=False)
 
@@ -63,7 +67,9 @@ def main() -> None:
 
         # now to back-translate that into a word, find closest glove vec to this
         # euclidean distances
-        dists: NDARR = np.linalg.norm(glove.values - vec_avg.values, axis=1)
+        dists: NDARR = np.linalg.norm(glove.values.astype(np.float16) -
+                                      vec_avg.values.astype(np.float16),
+                                      axis=1)
         hint_ix: int = dists.argmin()
         hint: str = glove.iloc[hint_ix].name
 
