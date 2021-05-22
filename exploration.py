@@ -6,9 +6,15 @@ import csv
 import pandas as pd
 import numpy as np
 import functools
+import logging
 
 PDF = pd.DataFrame
 NDARR = np.ndarray
+
+# see here https://stackoverflow.com/a/38537983
+logging.basicConfig()
+logging.getLogger().setLevel(logging.DEBUG)
+info = logging.info
 
 
 def main() -> None:
@@ -29,69 +35,48 @@ def main() -> None:
     dtypes: dict = {i: np.float16 for i in range(1, len(glove.columns) + 1)}
     glove = glove.astype(dtypes)
 
-    # nouns in the english language
-    en_noun_path: str = './english_noun_lists/great_noun_list/nounlist.txt'
-    with open(en_noun_path, 'r') as f:
+    # words (mostly nouns though) in the english language
+    # great noun list
+    # http://www.desiquintans.com/nounlist
+    gr_n_l_path: str = "./english_noun_lists/great_noun_list/nounlist.txt"
+    with open(gr_n_l_path, "r") as f:
         # lowercase to match glove
         # read().splitlines() instead of readlines() to get rid of
         # trailing newlines
-        en_nouns: list = [word.lower() for word in f.read().splitlines()]
+        gr_n_l_nouns: set = set([word.lower() for word in f.read().splitlines()])
 
-    nouns_with_glove = set(en_nouns).intersection(set(glove.index))
-    glove = glove.loc[nouns_with_glove]
+    # webster's unabridged
+    # https://www.gutenberg.org/ebooks/author/139
+    wbstr_pth: str = "./english_noun_lists/webster_unabridged/extracted_nouns.txt"
+    with open(wbstr_pth, "r") as f:
+        wbstr_nouns: set = set([word.lower() for word in f.read().splitlines()])
 
-    # webster unabridged
-    webster_path: str = './english_noun_lists/webster_unabridged/Webster Unabridged Dictionary R.htm'
+    # dwyl english word list
+    # https://github.com/dwyl/english-words/
+    dywl_pth: str = "./english_noun_lists/dwyl_english_words/words_alpha.txt"
+    with open(dywl_pth, "r") as f:
+        dwyl_words: set = set([word.lower() for word in f.read().splitlines()])
 
-    import bs4
-    Tag = bs4.element.Tag
-    with open(webster_path, 'r') as f:
-        webster_soup = bs4.BeautifulSoup(f, 'html.parser')
+    # overlap between various word collections and glove
+    glove_wrds = set(glove.index)
+    len(glove_wrds)
+    len(wbstr_nouns)
+    len(wbstr_nouns.intersection(glove_wrds))
+    len(gr_n_l_nouns)
+    len(gr_n_l_nouns.intersection(glove_wrds))
+    len(gr_n_l_nouns.intersection(wbstr_nouns))
+    len(dwyl_words)
+    # only ~100k glove words left after filtering by dwyl. seems like a reasonable reduction
+    len(dwyl_words.intersection(glove_wrds))
+    len(dwyl_words.intersection(gr_n_l_nouns))
+    len(dwyl_words.intersection(wbstr_nouns))
+    # conclusion: dwyl contains basically words from great noun list and webster
+    # question: does it contain additional useful words though?
 
-    p_tags: list = webster_soup.find_all('p')
 
-    def is_noun_entry(p_tag: Tag) -> bool:
-        """
-        <p> tag is a noun dictionary entry if 2nd child is "<i>n.</i>"
-        :param p_tag:
-        :return:
-        """
-        try:
-            sec_child = list(p_tag.children)[1]
-        # sometimes there are fewer than 2 children
-        except IndexError:
-            return False
-
-        return (sec_child.name == 'i') and (sec_child.contents[0] == 'n.')
-
-    noun_tags: list = [pt for pt in p_tags if is_noun_entry(pt)]
-
-    def noun_tag_to_clean_noun(noun_tag: Tag) -> str:
-        cleaned = noun_tag.contents[0].strip().lower()
-        import re
-        # remove (parenthetical explanations of words)
-        explanation_pattern = re.compile(r'(.+) \(.*\)')
-        match = explanation_pattern.match(cleaned)
-        if match is not None:
-            cleaned = match.group(1)
-        # remove ', alternative spelling of word'
-        cleaned = cleaned.split(',')[0]
-        # encode spaces as underscore so they survive next steps
-        space_pattern = re.compile(r' ')
-        cleaned = space_pattern.sub('_', cleaned)
-        # remove all non-letter characters
-        non_letter_pattern = re.compile(r'\W')
-        cleaned = non_letter_pattern.sub('', cleaned)
-        # re-instate previous whitespaces
-        underscore_pattern = re.compile(r'_')
-        cleaned = underscore_pattern.sub(' ', cleaned)
-        cleaned = cleaned.strip()
-        return cleaned
-
-    print("\n".join([noun_tag_to_clean_noun(nt) for nt in noun_tags[:10]]))
-
-    # multiple meanings of same-spelled word give duplicates, fix here
-    webster_nouns = set([noun_tag_to_clean_noun(nt) for nt in noun_tags])
+    # glv_wrds_accept_set: set = set(glove.index).intersection(dwyl_words.union(wbstr_nouns).union(gr_n_l_nouns))
+    glv_wrds_accept_set: set = set(glove.index).intersection(wbstr_nouns.union(gr_n_l_nouns))
+    glove_filtered = glove.loc[glv_wrds_accept_set]
 
     wordlist_ids = ["ceadmilefailte", "default", "duet", "thegamegal", "thegamegal"]
 
@@ -116,7 +101,7 @@ def main() -> None:
 
         # can we find some vectors for this?
         try:
-            vecs: PDF = glove.loc[riddle]
+            vecs: PDF = glove_filtered.loc[riddle]
         except KeyError as e:
             print("not all words of riddle contained in glove vecs")
             print(f"riddle: {riddle}")
@@ -126,12 +111,14 @@ def main() -> None:
         vec_avg = vecs.mean()
 
         # don't want a riddle word to be a possible hint
-        glove_no_riddle = glove[~glove.index.isin(riddle)]
+        glove_no_riddle = glove_filtered[~glove_filtered.index.isin(riddle)]
 
         # now to back-translate that into a word, find closest glove vec to this
         # euclidean distances
         dists: NDARR = np.linalg.norm(
-            glove_no_riddle.values.astype(np.float16) - vec_avg.values.astype(np.float16), axis=1
+            glove_no_riddle.values.astype(np.float16)
+            - vec_avg.values.astype(np.float16),
+            axis=1,
         )
         hint_ix: int = dists.argmin()
         hint: str = glove_no_riddle.iloc[hint_ix].name
