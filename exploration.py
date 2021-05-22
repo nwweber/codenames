@@ -40,6 +40,59 @@ def main() -> None:
     nouns_with_glove = set(en_nouns).intersection(set(glove.index))
     glove = glove.loc[nouns_with_glove]
 
+    # webster unabridged
+    webster_path: str = './english_noun_lists/webster_unabridged/Webster Unabridged Dictionary R.htm'
+
+    import bs4
+    Tag = bs4.element.Tag
+    with open(webster_path, 'r') as f:
+        webster_soup = bs4.BeautifulSoup(f, 'html.parser')
+
+    p_tags: list = webster_soup.find_all('p')
+
+    def is_noun_entry(p_tag: Tag) -> bool:
+        """
+        <p> tag is a noun dictionary entry if 2nd child is "<i>n.</i>"
+        :param p_tag:
+        :return:
+        """
+        try:
+            sec_child = list(p_tag.children)[1]
+        # sometimes there are fewer than 2 children
+        except IndexError:
+            return False
+
+        return (sec_child.name == 'i') and (sec_child.contents[0] == 'n.')
+
+    noun_tags: list = [pt for pt in p_tags if is_noun_entry(pt)]
+
+    def noun_tag_to_clean_noun(noun_tag: Tag) -> str:
+        cleaned = noun_tag.contents[0].strip().lower()
+        import re
+        # remove (parenthetical explanations of words)
+        explanation_pattern = re.compile(r'(.+) \(.*\)')
+        match = explanation_pattern.match(cleaned)
+        if match is not None:
+            cleaned = match.group(1)
+        # remove ', alternative spelling of word'
+        cleaned = cleaned.split(',')[0]
+        # encode spaces as underscore so they survive next steps
+        space_pattern = re.compile(r' ')
+        cleaned = space_pattern.sub('_', cleaned)
+        # remove all non-letter characters
+        non_letter_pattern = re.compile(r'\W')
+        cleaned = non_letter_pattern.sub('', cleaned)
+        # re-instate previous whitespaces
+        underscore_pattern = re.compile(r'_')
+        cleaned = underscore_pattern.sub(' ', cleaned)
+        cleaned = cleaned.strip()
+        return cleaned
+
+    print("\n".join([noun_tag_to_clean_noun(nt) for nt in noun_tags[:10]]))
+
+    # multiple meanings of same-spelled word give duplicates, fix here
+    webster_nouns = set([noun_tag_to_clean_noun(nt) for nt in noun_tags])
+
     wordlist_ids = ["ceadmilefailte", "default", "duet", "thegamegal", "thegamegal"]
 
     codewords: set = set()
