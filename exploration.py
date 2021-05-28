@@ -2,11 +2,11 @@
 just playing around a bit
 """
 import csv
-
-import pandas as pd
-import numpy as np
-import functools
 import logging
+
+import numpy as np
+import pandas as pd
+from sklearn.decomposition import PCA
 
 PDF = pd.DataFrame
 NDARR = np.ndarray
@@ -17,23 +17,94 @@ logging.getLogger().setLevel(logging.DEBUG)
 info = logging.info
 
 
+TEST_CASES_2W: list = [
+    ["table", "chair"],  # furniture
+    ["pilot", "airplane"],  # vehicle?
+    ["apple", "banana"],  # fruit, food
+    ["window", "door"],  # house, building
+    ['train', 'car'],  # vehicle?
+    ['cake', 'table'],  # meal
+    ['cake', 'cookie'],  # dessert? pastry?
+    ['cookie', 'croissant'],  # pastry?
+    ['croissant', 'brie'],  # france?
+    ['brie', 'gouda'],  # cheese
+    ['gouda', 'tulip'],  # netherlands
+    ['tulip', 'rose'],  # flower
+]
+
+
+TEST_CASES_3W: list = [
+    ["table", "chair", 'couch'],  # furniture
+    ["pilot", "airplane", 'helicopter'],  # vehicle?
+    ["apple", "banana", 'strawberry'],  # fruit, food
+    ["window", "door", 'roof'],  # house, building
+    ['train', 'car', 'bus'],  # vehicle?
+    ['cake', 'table', 'tea'],  # meal
+    ['cake', 'cookie', 'pudding'],  # dessert? pastry?
+    ['cookie', 'croissant', 'brownie'],  # pastry?
+    ['croissant', 'brie', 'wine'],  # france?
+    ['brie', 'gouda', 'roquefort'],  # cheese
+    ['gouda', 'tulip', 'canal'],  # netherlands
+    ['tulip', 'rose', 'orchid'],  # flower
+]
+
+ALL_TEST_CASES = TEST_CASES_2W + TEST_CASES_3W
+
+
+def generate_hints(riddle: list, glove: PDF, k: int = 5) -> list:
+    """
+    for a riddle, i.e. a bunch of words, generate best hints we can come up, ordered by goodness
+    :param k: int > 0 nr of best hints to return
+    :param glove: pandas DF of glove vectors, indexed by word
+    :param riddle:
+    :return:
+    """
+    # can we find some vectors for this?
+    vecs: PDF = glove.loc[riddle]
+
+    # average of those
+    vec_avg = vecs.mean()
+
+    # don't want a riddle word to be a possible hint
+    glove_no_riddle = glove[~glove.index.isin(riddle)]
+
+    # now to back-translate that into a word, find closest glove vec to this
+    # euclidean distances
+    dists: NDARR = np.linalg.norm(
+        glove_no_riddle.values.astype(np.float16) - vec_avg.values.astype(np.float16),
+        axis=1,
+    )
+    # hint_ix: int = dists.argmin()
+    # hint: list = [glove_no_riddle.iloc[hint_ix].name]
+
+    # noinspection PyUnresolvedReferences
+    hint_ix: NDARR = np.argsort(dists)[:k]
+    hint: list = list(glove_no_riddle.iloc[hint_ix].index)
+
+    return hint
+
+
 def main() -> None:
-    glove_path: str = "./embeddings/glove/6b/glove.6B.300d.txt"
+    # glove_path: str = "./embeddings/glove/6b/glove.6B.300d.txt"
     # glove_path: str = "./embeddings/glove/840b/glove.840B.300d.txt"
-    glove: PDF = pd.read_csv(
+    glove_path: str = "./embeddings/glove/840b/glove.840B.300d.txt.python_filtered"
+    glove_raw: PDF = pd.read_csv(
         filepath_or_buffer=glove_path,
         delim_whitespace=True,
         engine="c",
         header=None,
         index_col=0,
-        # nrows=100000,
         quoting=csv.QUOTE_NONE,
     )
 
     # can't do this while reading, ignored by csv parser, see here:
     # https://stackoverflow.com/questions/24761122/pandas-read-csv-ignoring-column-dtypes-when-i-pass-skip-footer-arg
-    dtypes: dict = {i: np.float16 for i in range(1, len(glove.columns) + 1)}
-    glove = glove.astype(dtypes)
+    dtypes: dict = {i: np.float16 for i in range(1, len(glove_raw.columns) + 1)}
+    glove = glove_raw.astype(dtypes)
+
+    pca = PCA(n_components=300)
+    glove_vecs_transformed = pca.fit_transform(glove.values)
+    glove = pd.DataFrame(data=glove_vecs_transformed, index=glove.index)
 
     # words (mostly nouns though) in the english language
     # great noun list
@@ -57,29 +128,7 @@ def main() -> None:
     with open(dywl_pth, "r") as f:
         dwyl_words: set = set([word.lower() for word in f.read().splitlines()])
 
-    # overlap between various word collections and glove
-    glove_wrds = set(glove.index)
-    len(glove_wrds)
-    len(wbstr_nouns)
-    len(wbstr_nouns.intersection(glove_wrds))
-    len(gr_n_l_nouns)
-    len(gr_n_l_nouns.intersection(glove_wrds))
-    len(gr_n_l_nouns.intersection(wbstr_nouns))
-    len(dwyl_words)
-    # only ~100k glove words left after filtering by dwyl. seems like a reasonable reduction
-    len(dwyl_words.intersection(glove_wrds))
-    len(dwyl_words.intersection(gr_n_l_nouns))
-    len(dwyl_words.intersection(wbstr_nouns))
-    # conclusion: dwyl contains basically words from great noun list and webster
-    # question: does it contain additional useful words though?
-
-
-    # glv_wrds_accept_set: set = set(glove.index).intersection(dwyl_words.union(wbstr_nouns).union(gr_n_l_nouns))
-    glv_wrds_accept_set: set = set(glove.index).intersection(wbstr_nouns.union(gr_n_l_nouns))
-    glove_filtered = glove.loc[glv_wrds_accept_set]
-
     wordlist_ids = ["ceadmilefailte", "default", "duet", "thegamegal", "thegamegal"]
-
     codewords: set = set()
     for wordlist_id in wordlist_ids:
         wordlist_path_template: str = "./wordlists/sagelga/wordlist/en-EN/{}/wordlist.txt"
@@ -89,42 +138,29 @@ def main() -> None:
             # read().splitlines() instead of readlines() to get rid of
             # trailing newlines
             words: set = set([word.lower() for word in f.read().splitlines()])
-
         codewords = codewords.union(words)
 
-    codewords_l: list = list(codewords)
-    rand_state = np.random.RandomState(0)
+    # write this out for other uses
+    accepted_hints: set = wbstr_nouns.union(gr_n_l_nouns).union(codewords)
+    # artifact from webster parsing upstream
+    accepted_hints.remove("")
+    with open("./accepted_hints.txt", "w") as f:
+        f.writelines("\n".join(accepted_hints))
 
-    for i in range(5):
-        # make some riddles
-        riddle: NDARR = rand_state.choice(codewords_l, 2, replace=False)
+    glv_wrds_accept_set: set = set(glove.index).intersection(accepted_hints)
+    glove_filtered = glove.loc[glv_wrds_accept_set]
 
-        # can we find some vectors for this?
+    hints = []
+    for riddle in ALL_TEST_CASES:
         try:
-            vecs: PDF = glove_filtered.loc[riddle]
-        except KeyError as e:
-            print("not all words of riddle contained in glove vecs")
-            print(f"riddle: {riddle}")
-            continue
+            hint = generate_hints(riddle, glove_filtered)
+        except KeyError:
+            hint = []
+            print("not all words of riddle contained in glove vecs, can't generate hint")
+        hints.append(hint)
 
-        # average of those
-        vec_avg = vecs.mean()
-
-        # don't want a riddle word to be a possible hint
-        glove_no_riddle = glove_filtered[~glove_filtered.index.isin(riddle)]
-
-        # now to back-translate that into a word, find closest glove vec to this
-        # euclidean distances
-        dists: NDARR = np.linalg.norm(
-            glove_no_riddle.values.astype(np.float16)
-            - vec_avg.values.astype(np.float16),
-            axis=1,
-        )
-        hint_ix: int = dists.argmin()
-        hint: str = glove_no_riddle.iloc[hint_ix].name
-
-        print(f"riddle: {riddle}")
-        print(f"hint: {hint}")
+    overview: PDF = pd.DataFrame(data=zip(ALL_TEST_CASES, hints), columns=['riddle', 'hints'])
+    print(overview)
 
 
 if __name__ == "__main__":
