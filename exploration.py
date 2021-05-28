@@ -100,11 +100,8 @@ def main() -> None:
     # can't do this while reading, ignored by csv parser, see here:
     # https://stackoverflow.com/questions/24761122/pandas-read-csv-ignoring-column-dtypes-when-i-pass-skip-footer-arg
     dtypes: dict = {i: np.float16 for i in range(1, len(glove_raw.columns) + 1)}
-    glove = glove_raw.astype(dtypes)
+    glove_raw = glove_raw.astype(dtypes)
 
-    pca = PCA(n_components=300)
-    glove_vecs_transformed = pca.fit_transform(glove.values)
-    glove = pd.DataFrame(data=glove_vecs_transformed, index=glove.index)
 
     # words (mostly nouns though) in the english language
     # great noun list
@@ -147,20 +144,40 @@ def main() -> None:
     with open("./accepted_hints.txt", "w") as f:
         f.writelines("\n".join(accepted_hints))
 
-    glv_wrds_accept_set: set = set(glove.index).intersection(accepted_hints)
-    glove_filtered = glove.loc[glv_wrds_accept_set]
+    glv_wrds_accept_set: set = set(glove_raw.index).intersection(accepted_hints)
+    # TODO words in Glove are Case Sensitive, but my 'accepted hints' are not, cutting out too many words
+    glove_filtered = glove_raw.loc[glv_wrds_accept_set]
 
-    hints = []
-    for riddle in ALL_TEST_CASES:
-        try:
-            hint = generate_hints(riddle, glove_filtered)
-        except KeyError:
-            hint = []
-            print("not all words of riddle contained in glove vecs, can't generate hint")
-        hints.append(hint)
+    overviews = []
+    pca_dims_choices = [3, 10, 30, 100, 200, 300]
+    for n_pca_dims in pca_dims_choices:
+        info(f'calculating hints for {n_pca_dims} dimensions')
+        pca = PCA(n_components=n_pca_dims)
+        glove_vecs_transformed = pca.fit_transform(glove_filtered.values)
+        glove = pd.DataFrame(data=glove_vecs_transformed, index=glove_filtered.index)
 
-    overview: PDF = pd.DataFrame(data=zip(ALL_TEST_CASES, hints), columns=['riddle', 'hints'])
-    print(overview)
+        hints = []
+        for riddle in ALL_TEST_CASES:
+            try:
+                hint = generate_hints(riddle, glove)
+            except KeyError:
+                hint = []
+                print("not all words of riddle contained in glove vecs, can't generate hint")
+            hints.append(hint)
+
+        overview: PDF = pd.DataFrame(data=zip(ALL_TEST_CASES, hints), columns=['riddle', 'hints'])
+        overviews.append(overview)
+
+    # TODO combine overview dataframes into single frame and display that one
+
+    all_hints: list = [ov['hints'].tolist() for ov in overviews]
+    total_ov: PDF = pd.DataFrame(
+        data=zip(ALL_TEST_CASES, *all_hints),
+        columns=['riddle'] + [f'{d}_dims_hints' for d in pca_dims_choices]
+    )
+    print(total_ov)
+
+
 
 
 if __name__ == "__main__":
