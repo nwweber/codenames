@@ -22,30 +22,30 @@ TEST_CASES_2W: list = [
     ["pilot", "airplane"],  # vehicle?
     ["apple", "banana"],  # fruit, food
     ["window", "door"],  # house, building
-    ['train', 'car'],  # vehicle?
-    ['cake', 'table'],  # meal
-    ['cake', 'cookie'],  # dessert? pastry?
-    ['cookie', 'croissant'],  # pastry?
-    ['croissant', 'brie'],  # france?
-    ['brie', 'gouda'],  # cheese
-    ['gouda', 'tulip'],  # netherlands
-    ['tulip', 'rose'],  # flower
+    ["train", "car"],  # vehicle?
+    ["cake", "table"],  # meal
+    ["cake", "cookie"],  # dessert? pastry?
+    ["cookie", "croissant"],  # pastry?
+    ["croissant", "brie"],  # france?
+    ["brie", "gouda"],  # cheese
+    ["gouda", "tulip"],  # netherlands
+    ["tulip", "rose"],  # flower
 ]
 
 
 TEST_CASES_3W: list = [
-    ["table", "chair", 'couch'],  # furniture
-    ["pilot", "airplane", 'helicopter'],  # vehicle?
-    ["apple", "banana", 'strawberry'],  # fruit, food
-    ["window", "door", 'roof'],  # house, building
-    ['train', 'car', 'bus'],  # vehicle?
-    ['cake', 'table', 'tea'],  # meal
-    ['cake', 'cookie', 'pudding'],  # dessert? pastry?
-    ['cookie', 'croissant', 'brownie'],  # pastry?
-    ['croissant', 'brie', 'wine'],  # france?
-    ['brie', 'gouda', 'roquefort'],  # cheese
-    ['gouda', 'tulip', 'canal'],  # netherlands
-    ['tulip', 'rose', 'orchid'],  # flower
+    ["table", "chair", "couch"],  # furniture
+    ["pilot", "airplane", "helicopter"],  # vehicle?
+    ["apple", "banana", "strawberry"],  # fruit, food
+    ["window", "door", "roof"],  # house, building
+    ["train", "car", "bus"],  # vehicle?
+    ["cake", "table", "tea"],  # meal
+    ["cake", "cookie", "pudding"],  # dessert? pastry?
+    ["cookie", "croissant", "brownie"],  # pastry?
+    ["croissant", "brie", "wine"],  # france?
+    ["brie", "gouda", "roquefort"],  # cheese
+    ["gouda", "tulip", "canal"],  # netherlands
+    ["tulip", "rose", "orchid"],  # flower
 ]
 
 # sort to make sure related cases are next to each other
@@ -121,7 +121,6 @@ def main() -> None:
     dtypes: dict = {i: np.float16 for i in range(1, len(glove_raw.columns) + 1)}
     glove_raw = glove_raw.astype(dtypes)
 
-
     # words (mostly nouns though) in the english language
     # great noun list
     # http://www.desiquintans.com/nounlist
@@ -169,7 +168,7 @@ def main() -> None:
 
     hints = []
     for riddle in ALL_TEST_CASES:
-        info(f'solving riddle {riddle}')
+        info(f"solving riddle {riddle}")
         try:
             hint = generate_hints(riddle, glove_filtered)
         except KeyError:
@@ -177,7 +176,9 @@ def main() -> None:
             info("not all words of riddle contained in glove vecs, can't generate hint")
         hints.append(hint)
 
-    overview: PDF = pd.DataFrame(data=zip(ALL_TEST_CASES, hints), columns=['riddle', 'hints'])
+    overview: PDF = pd.DataFrame(
+        data=zip(ALL_TEST_CASES, hints), columns=["riddle", "hints"]
+    )
     info(overview)
 
 
