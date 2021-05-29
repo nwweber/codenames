@@ -3,7 +3,7 @@ just playing around a bit
 """
 import csv
 import logging
-
+import re
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
@@ -66,21 +66,39 @@ def generate_hints(riddle: list, glove: PDF, k: int = 5) -> list:
     # average of those
     vec_avg = vecs.mean()
 
-    # don't want a riddle word to be a possible hint
-    glove_no_riddle = glove[~glove.index.isin(riddle)]
+    # filter glove words to only contain legal hints
+    # hint can not be:
+    # * one of the riddle words
+    # * a substring of one of the riddle words, i.e. hint cannot be 'cake' for riddle 'cheesecake'
+    # * a superstring of one of the riddle words, i.e. hint cannot be 'cheesecake' for riddle 'cake'
+
+    # initially, all hints are viable
+    hint_mask = np.repeat(True, len(glove))
+    # for each word contained in riddle: only leave hints (glove words) that are neither super- nor sub-strings of
+    # the riddle word (including full match)
+    for riddle_word in riddle:
+        # riddle word is not substring of hints, includes case of hint == riddle
+        not_substring: NDARR = ~glove.index.str.contains(riddle_word)
+        # hints are not substring of riddle word, e.g. illegal: hint: 'cake' for riddle: 'cheesecake'
+        bool_ix = []
+        for hint_candidate in glove.index:
+            bool_ix.append(hint_candidate not in riddle_word)
+        not_superstring = np.asarray(bool_ix)
+        # combine with existing mask
+        hint_mask = hint_mask & not_superstring & not_substring
+
+    glove_legal_hints = glove[hint_mask]
 
     # now to back-translate that into a word, find closest glove vec to this
     # euclidean distances
     dists: NDARR = np.linalg.norm(
-        glove_no_riddle.values.astype(np.float16) - vec_avg.values.astype(np.float16),
+        glove_legal_hints.values.astype(np.float16) - vec_avg.values.astype(np.float16),
         axis=1,
     )
-    # hint_ix: int = dists.argmin()
-    # hint: list = [glove_no_riddle.iloc[hint_ix].name]
 
     # noinspection PyUnresolvedReferences
     hint_ix: NDARR = np.argsort(dists)[:k]
-    hint: list = list(glove_no_riddle.iloc[hint_ix].index)
+    hint: list = list(glove_legal_hints.iloc[hint_ix].index)
 
     return hint
 
@@ -149,34 +167,18 @@ def main() -> None:
     # TODO words in Glove are Case Sensitive, but my 'accepted hints' are not, cutting out too many words
     glove_filtered = glove_raw.loc[glv_wrds_accept_set]
 
-    overviews = []
-    pca_dims_choices = [3, 10, 30, 100, 200, 300]
-    for n_pca_dims in pca_dims_choices:
-        info(f'calculating hints for {n_pca_dims} dimensions')
-        pca = PCA(n_components=n_pca_dims)
-        glove_vecs_transformed = pca.fit_transform(glove_filtered.values)
-        glove = pd.DataFrame(data=glove_vecs_transformed, index=glove_filtered.index)
+    hints = []
+    for riddle in ALL_TEST_CASES:
+        info(f'solving riddle {riddle}')
+        try:
+            hint = generate_hints(riddle, glove_filtered)
+        except KeyError:
+            hint = []
+            info("not all words of riddle contained in glove vecs, can't generate hint")
+        hints.append(hint)
 
-        hints = []
-        for riddle in ALL_TEST_CASES:
-            try:
-                hint = generate_hints(riddle, glove)
-            except KeyError:
-                hint = []
-                print("not all words of riddle contained in glove vecs, can't generate hint")
-            hints.append(hint)
-
-        overview: PDF = pd.DataFrame(data=zip(ALL_TEST_CASES, hints), columns=['riddle', 'hints'])
-        overviews.append(overview)
-
-    all_hints: list = [ov['hints'].tolist() for ov in overviews]
-    total_ov: PDF = pd.DataFrame(
-        data=zip(ALL_TEST_CASES, *all_hints),
-        columns=['riddle'] + [f'{d}_dims_hints' for d in pca_dims_choices]
-    )
-    print(total_ov)
-    # transposed easier to read + compare as a sheet
-    total_ov.T.to_csv('./pca_dims_vs_hints.csv')
+    overview: PDF = pd.DataFrame(data=zip(ALL_TEST_CASES, hints), columns=['riddle', 'hints'])
+    info(overview)
 
 
 if __name__ == "__main__":
