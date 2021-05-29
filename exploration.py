@@ -48,7 +48,8 @@ TEST_CASES_3W: list = [
     ['tulip', 'rose', 'orchid'],  # flower
 ]
 
-ALL_TEST_CASES = TEST_CASES_2W + TEST_CASES_3W
+# sort to make sure related cases are next to each other
+ALL_TEST_CASES = sorted(TEST_CASES_2W + TEST_CASES_3W)
 
 
 def generate_hints(riddle: list, glove: PDF, k: int = 5) -> list:
@@ -168,16 +169,14 @@ def main() -> None:
         overview: PDF = pd.DataFrame(data=zip(ALL_TEST_CASES, hints), columns=['riddle', 'hints'])
         overviews.append(overview)
 
-    # TODO combine overview dataframes into single frame and display that one
-
     all_hints: list = [ov['hints'].tolist() for ov in overviews]
     total_ov: PDF = pd.DataFrame(
         data=zip(ALL_TEST_CASES, *all_hints),
         columns=['riddle'] + [f'{d}_dims_hints' for d in pca_dims_choices]
     )
     print(total_ov)
-
-
+    # transposed easier to read + compare as a sheet
+    total_ov.T.to_csv('./pca_dims_vs_hints.csv')
 
 
 if __name__ == "__main__":
