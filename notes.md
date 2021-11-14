@@ -18,3 +18,4 @@
 for this game, otherwise lots of learning time wasted on that. hmm
 * can i simplify codenames to be single player game (essentially)?
 * consider implementing duet instead? https://www.youtube.com/watch?v=PUTNDlnxLk8
+* multi agent rl paper collection, including overviews: https://github.com/LantaoYu/MARL-Papers
