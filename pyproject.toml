@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = 'codenames'
+version = '0.0.1'
+dependencies = [
+    "numpy",
+    "pandas",
+    "pyarrow",
+    "mypy",
+    "ruff",
+    "tabulate",
+]
+requires-python = ">=3.10"
+authors = [
+    {name = 'Niklas Weber'}
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    '/src',
+]
+
+[tool.hatch.build.targets.wheel]
+include = [
+    '/src',
+]
+
+[tool.mypy]
+files = 'src'
+strict = true
