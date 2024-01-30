@@ -9,6 +9,7 @@ import typing
 from pathlib import Path
 from typing import List, TypeAlias
 
+import gymnasium
 import numpy as np
 import pandas as pd
 import tabulate
@@ -114,11 +115,13 @@ class Board:
     This class is responsible for maintaining the current board state and methods
     related to that.
     """
+
     def __init__(self, cards: list[Card]):
         self.cards = cards
 
     def display(self) -> None:
         """Pretty prints the contents of the board. No information is hidden."""
+
         def card_to_str(card: Card) -> str:
             """
             Formats a Card to be displayed in a grid cell of a text-based table.
@@ -126,15 +129,17 @@ class Board:
             card_type_str: str
             match card.type:
                 case CardType.AGENT:
-                    card_type_str = 'A'
+                    card_type_str = "A"
                 case CardType.NEUTRAL:
-                    card_type_str = 'N'
+                    card_type_str = "N"
                 case CardType.ASSASSIN:
                     # unicode 'skull and crossbones'
-                    card_type_str = '\u2620'
+                    card_type_str = "\u2620"
                 case _:
-                    card_type_str = '?'
-            display_str = f"""{'* ' if card.is_played else ''}{card.word} [{card_type_str}]"""
+                    card_type_str = "?"
+            display_str = (
+                f"""{'* ' if card.is_played else ''}{card.word} [{card_type_str}]"""
+            )
             return display_str
 
         str_matrix: list[list[str]] = []
@@ -144,14 +149,16 @@ class Board:
                 str_matrix.append([])
             str_matrix[-1].append(f"{card_to_str(card)} ({card_nr})")
 
-        print(tabulate.tabulate(str_matrix, tablefmt='grid'))
-        print('* = already played')
+        print(tabulate.tabulate(str_matrix, tablefmt="grid"))
+        print("* = already played")
 
     def all_agents_found(self) -> bool:
         """
         Returns True iff all cards with type Agent have been played/found.
         """
-        return all([card.is_played for card in self.cards if card.type == CardType.AGENT])
+        return all(
+            [card.is_played for card in self.cards if card.type == CardType.AGENT]
+        )
 
 
 class Guesser:
@@ -196,7 +203,9 @@ class CodeNamesGame:
         card_index = guess
         guessed_card = self.board.cards[card_index]
         guessed_card.is_played = True
-        print(f"You guessed '{guessed_card.word}'. It is a(n) {guessed_card.type.value} card.")
+        print(
+            f"You guessed '{guessed_card.word}'. It is a(n) {guessed_card.type.value} card."
+        )
         match guessed_card.type:
             case CardType.ASSASSIN:
                 self.lose()
@@ -205,32 +214,34 @@ class CodeNamesGame:
                 return True
             case CardType.AGENT:
                 if self.board.all_agents_found():
-                    print('Well done! You have found the last agent and win!')
+                    print("Well done! You have found the last agent and win!")
                     self.win()
-                print('Well done! You can now choose to take another guess, or to '
-                      'yield your turn and get new hint from the Spymaster.')
+                print(
+                    "Well done! You can now choose to take another guess, or to "
+                    "yield your turn and get new hint from the Spymaster."
+                )
                 return False
             case CardType.NEUTRAL:
-                print('The Spymaster can now give another hint if there are turns left.')
+                print(
+                    "The Spymaster can now give another hint if there are turns left."
+                )
                 return True
         typing.assert_never(guessed_card.type)
 
     def lose(self) -> None:
-        print('oh no, you lost :((((((')
+        print("oh no, you lost :((((((")
         sys.exit()
 
     def play(self) -> None:
         turn_limit = 9
         turn_count = 1
         while turn_count <= turn_limit:
-            print(f'\n==== Turn {turn_count} ===\n')
+            print(f"\n==== Turn {turn_count} ===\n")
             hint: Hint = self.spymaster.generate_hint()
             guess_count = 1
             while True:
                 guess: Guess = self.guesser.generate_guess(
-                    board=self.board,
-                    hint=hint,
-                    is_yield_allowed=guess_count > 1
+                    board=self.board, hint=hint, is_yield_allowed=guess_count > 1
                 )
                 guess_count += 1
                 stop_guess = self.handle_guess(guess)
@@ -238,11 +249,11 @@ class CodeNamesGame:
                     break
             turn_count += 1
         # we have reached the turn limit
-        print('Turn limit reached')
+        print("Turn limit reached")
         self.lose()
 
     def win(self) -> None:
-        print('Sweet, sweet victory')
+        print("Sweet, sweet victory")
         sys.exit()
 
 
@@ -256,7 +267,7 @@ def make_random_board(words: list[str]) -> Board:
     card_words = rng.choice(words, n_cards)
     index_permutation = rng.permutation(np.arange(n_cards))
     agent_ix = set(index_permutation[:n_agents])
-    assassin_ix = set(index_permutation[n_agents:(n_agents+n_assassins)])
+    assassin_ix = set(index_permutation[n_agents : (n_agents + n_assassins)])
     cards: list[Card] = []
     for i, word in enumerate(card_words):
         card_type: CardType
@@ -266,35 +277,86 @@ def make_random_board(words: list[str]) -> Board:
             card_type = CardType.ASSASSIN
         else:
             card_type = CardType.NEUTRAL
-        cards.append(Card(
-            word=word,
-            type=card_type,
-            is_played=False,
-        ))
+        cards.append(
+            Card(
+                word=word,
+                type=card_type,
+                is_played=False,
+            )
+        )
     return Board(cards)
 
 
+class CodenamesGuesserEnv(gymnasium.Env[typing.Any, np.int64]):
+    """
+    A Gymnasium Env in which the Guesser is an RL agent.
+    """
+    metadata = {"render_mode": ["human"]}
+
+    def __init__(self, words: list[str]) -> None:
+        # 25 cards on the board, 1 action for 'yield'
+        # -1 = yield, 0 .. 24 = index of card on board
+        self.action_space = gymnasium.spaces.Discrete(n=26, start=-1)
+        # TODO change me to actual observation space
+        # this will likely be tricky and need iteration
+        self.observation_space = gymnasium.spaces.Box(low=0, high=1)
+        self.words = words
+        # declare but should be set in `reset()`
+        self.game: CodeNamesGame | None = None
+
+    def reset(
+        self,
+        *,
+        seed: int | None = None,
+        options: dict[str, typing.Any] | None = None,
+    ) -> tuple[typing.Any, dict[str, typing.Any]]:
+        # required as per docs
+        super().reset(seed=seed)
+        self.game = CodeNamesGame(spymaster=Spymaster(), guesser=Guesser(), board=make_random_board(self.words))
+        return self._state_to_obs(), {}
+
+
+    def step(
+        self, action: np.int64
+    ) -> tuple[typing.Any, float, bool, bool, dict[str, typing.Any]]:
+        # how should this go?
+        # action -> Guesser action -> guess
+        # submit guess, if game not done: also generate new hint from Spymaster
+        # determine reward
+        # return
+        # -1 = 'yield' action, which is encoded as None in our game
+        assert isinstance(self.game, CodeNamesGame)
+        guess: Guess = None if action == -1 else int(action)
+
+        # TODO actually fill in everything below
+        self.game.handle_guess(guess)
+        reward = 1.0
+        terminated = False
+        truncated = False
+        info: dict[str, typing.Any] = {}
+        new_observation = self._state_to_obs()
+
+        return new_observation, reward, terminated, truncated, info
+
+    def _state_to_obs(self) -> typing.Any:
+        """
+        Construct an observation from current state.
+        """
+        pass
+
+
 def main() -> None:
-    codenames_wordlist_loc = Path(__file__).parent.parent.parent.joinpath('data').joinpath('codenames-wordlist-eng.txt')
-    with codenames_wordlist_loc.open('r') as f:
+    codenames_wordlist_path = (
+        Path(__file__)
+        .parent.parent.parent.joinpath("data")
+        .joinpath("codenames-wordlist-eng.txt")
+    )
+    with codenames_wordlist_path.open("r") as f:
         codenames_words = [word.strip().lower() for word in f.readlines()]
     board = make_random_board(codenames_words)
 
     game = CodeNamesGame(spymaster=Spymaster(), guesser=Guesser(), board=board)
     game.play()
-
-    # data_dir = Path("../data")
-    # embeddings_path = data_dir / 'codenames-en-words-glove-6b-50d-vectors.feather'
-    # embeddings: DataFrame
-    # if embeddings_path.exists():
-    #     print('word list and embedding cache exists, not recomputing it')
-    #     embeddings = pd.read_feather(embeddings_path)
-    # else:
-    #     glove_path = data_dir / "glove.6B.50d.txt"
-    #     codenames_words_path = data_dir / "codenames-wordlist-eng.txt"
-    #     print('creating word list and embedding cache')
-    #     embeddings = make_embeddings(glove_path, codenames_words_path)
-    #     embeddings.to_feather(embeddings_path)
 
 
 if __name__ == "__main__" and not is_interactive_py_session():

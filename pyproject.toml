@@ -12,8 +12,9 @@ dependencies = [
     "mypy",
     "ruff",
     "tabulate",
+    "gymnasium",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     {name = 'Niklas Weber'}
 ]
@@ -31,3 +32,5 @@ include = [
 [tool.mypy]
 files = 'src'
 strict = true
+
+[tool.ruff]
