@@ -152,6 +152,12 @@ class Board:
         print(tabulate.tabulate(str_matrix, tablefmt="grid"))
         print("* = already played")
 
+    def get_playable_indices(self) -> list[int]:
+        """
+        Returns the list of indices of unplayed cards on the board.
+        """
+        return [i for i, card in enumerate(self.cards) if not card.is_played]
+
     def all_agents_found(self) -> bool:
         """
         Returns True iff all cards with type Agent have been played/found.
@@ -257,7 +263,7 @@ class CodeNamesGame:
         sys.exit()
 
 
-def make_random_board(words: list[str]) -> Board:
+def make_random_board(words: list[str], rng: np.random.Generator) -> Board:
     """
     Generates a random board to play on.
     """
@@ -287,10 +293,31 @@ def make_random_board(words: list[str]) -> Board:
     return Board(cards)
 
 
-class CodenamesGuesserEnv(gymnasium.Env[typing.Any, np.int64]):
+@dataclasses.dataclass
+class GameState:
+    """
+    Encapsulating everything related to game state. Just a simple object holding values.
+    """
+
+    board: Board
+    turn_count: int = 1
+    max_turn_count: int = 9
+    current_hint: Hint | None = None
+    consecutive_guesses: int = 1
+
+
+BoardIndex: typing.TypeAlias = int
+
+
+ObsType = ...
+ActionType = np.int64
+
+
+class CodenamesGuesserEnv(gymnasium.Env[ObsType, ActionType]):
     """
     A Gymnasium Env in which the Guesser is an RL agent.
     """
+
     metadata = {"render_mode": ["human"]}
 
     def __init__(self, words: list[str]) -> None:
@@ -300,9 +327,8 @@ class CodenamesGuesserEnv(gymnasium.Env[typing.Any, np.int64]):
         # TODO change me to actual observation space
         # this will likely be tricky and need iteration
         self.observation_space = gymnasium.spaces.Box(low=0, high=1)
-        self.words = words
-        # declare but should be set in `reset()`
-        self.game: CodeNamesGame | None = None
+        self._words = words
+        self._gamestate: GameState | None = None
 
     def reset(
         self,
@@ -312,37 +338,132 @@ class CodenamesGuesserEnv(gymnasium.Env[typing.Any, np.int64]):
     ) -> tuple[typing.Any, dict[str, typing.Any]]:
         # required as per docs
         super().reset(seed=seed)
-        self.game = CodeNamesGame(spymaster=Spymaster(), guesser=Guesser(), board=make_random_board(self.words))
-        return self._state_to_obs(), {}
-
+        self._gamestate = GameState(
+            board=make_random_board(self._words, self.np_random)
+        )
+        hint: Hint = self._get_hint()
+        self._gamestate.current_hint = hint
+        return self._state_to_obs(self._gamestate), {}
 
     def step(
         self, action: np.int64
     ) -> tuple[typing.Any, float, bool, bool, dict[str, typing.Any]]:
+        """
+        Given a board and a hint coming from a Spymaster, get a guess from the Guesser.
+        Evaluate what happens based on that guess, with possibilities being:
+        - win
+        - lose
+        - get to guess again (do another step())
+        - get a new hint from the spymaster, then guess again
+
+
+        Winning or losing are indicated by the `terminated` flag. `truncated` is
+        not currently used because an episode is inherently limited in length due to
+        a turn limit that is part of Codenames.
+        """
         # how should this go?
         # action -> Guesser action -> guess
         # submit guess, if game not done: also generate new hint from Spymaster
         # determine reward
         # return
-        # -1 = 'yield' action, which is encoded as None in our game
-        assert isinstance(self.game, CodeNamesGame)
-        guess: Guess = None if action == -1 else int(action)
 
-        # TODO actually fill in everything below
-        self.game.handle_guess(guess)
-        reward = 1.0
+        # this is true after having called reset()
+        assert isinstance(self._gamestate, GameState)
+        # bit annoying to do this though
+        assert isinstance(self._gamestate.current_hint, Hint)
+
         terminated = False
+        reward = 0
         truncated = False
         info: dict[str, typing.Any] = {}
-        new_observation = self._state_to_obs()
+
+        if self._gamestate.turn_count > self._gamestate.max_turn_count:
+            reward -= 15
+            terminated = True
+            return (
+                self._state_to_obs(self._gamestate),
+                reward,
+                terminated,
+                truncated,
+                info,
+            )
+
+        guessed_card = self._gamestate.board.cards[int(action)]
+
+        match guessed_card.type:
+            case CardType.ASSASSIN:
+                terminated = True
+                reward -= 15
+            case CardType.AGENT:
+                if self._gamestate.board.all_agents_found():
+                    terminated = True
+                    reward += 15
+                reward += 5
+                self._gamestate.consecutive_guesses += 1
+            case CardType.NEUTRAL:
+                reward -= 2
+                self._gamestate.consecutive_guesses = 1
+                # neutral -> guesser has to stop guess, get new hint from spymaster
+                self._gamestate.current_hint = self._get_hint()
+            case _:
+                typing.assert_never(guessed_card.type)
+
+        # generic state updates
+        guessed_card.is_played = True
+        self._gamestate.turn_count += 1
+        # state updates end
+
+        new_observation = self._state_to_obs(self._gamestate)
 
         return new_observation, reward, terminated, truncated, info
 
-    def _state_to_obs(self) -> typing.Any:
+    @staticmethod
+    def _state_to_obs(gamestate: GameState) -> typing.Any:
         """
         Construct an observation from current state.
         """
-        pass
+        # this is a dummy implementation, first need to understand how to structure
+        # input well for RL agent
+        obs: list[typing.Any] = []
+
+
+        # output could look like:
+        # [int(word1), int(word2), ..., int(card_type1), int(card_type2 if card is played, sentinel otherwise), ..., int(is_played_n), ..., turn_count, max_turn_count, consecutive_guesses
+
+        n_cards = len(gamestate.board.cards)
+        word_encodings = np.zeros(n_cards, dtype=np.int64)
+        revealed_card_types = np.zeros(n_cards, dtype=np.int64)
+        cards_played_indicator = np.zeros(n_cards, dtype=np.int64)
+        for i, card in enumerate(gamestate.board.cards):
+            word_encodings[i] = encode_word(card.word)
+            revealed_card_types[i] = 
+            cards_played_indicator[i] = int(card.is_played)
+
+
+        obs.extend(gamestate.board.cards)
+        obs.extend(
+            [gamestate.current_hint, gamestate.turn_count, gamestate.max_turn_count]
+        )
+        return obs
+
+    @staticmethod
+    def _get_hint() -> Hint:
+        """
+        Elicit hint from spymaster.
+        """
+        # bootstrapping: hard-coded to see if rest of code runs
+        return Hint("bob", 2)
+
+    def _get_guess(self, gamestate: GameState) -> BoardIndex:
+        """
+        Elicit guess from guesser. Returns guessed BoardIndex, i.e.
+        index of Card on Board that Guesser wants to play.
+
+        As a simplification we currently don't given the Guesser the option to
+        yield their turn.
+        """
+        playable_indices: list[BoardIndex] = gamestate.board.get_playable_indices()
+        return int(self.np_random.choice(playable_indices, size=1)[0])
 
 
 def main() -> None:
@@ -353,10 +474,20 @@ def main() -> None:
     )
     with codenames_wordlist_path.open("r") as f:
         codenames_words = [word.strip().lower() for word in f.readlines()]
-    board = make_random_board(codenames_words)
 
-    game = CodeNamesGame(spymaster=Spymaster(), guesser=Guesser(), board=board)
-    game.play()
+    # board = make_random_board(codenames_words, np.random.default_rng(42))
+    # game = CodeNamesGame(spymaster=Spymaster(), guesser=Guesser(), board=board)
+    # game.play()
+
+    env = CodenamesGuesserEnv(words=codenames_words)
+    env.reset()
+    from gymnasium.utils import env_checker
+    env_checker.check_env(env)
+    # # env._state_to_obs(env._gamestate)
+    # env._get_guess(env._gamestate)
+    # env.step(0)
+
+    print("hi")
 
 
 if __name__ == "__main__" and not is_interactive_py_session():

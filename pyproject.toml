@@ -5,15 +5,6 @@ build-backend = "hatchling.build"
 [project]
 name = 'codenames'
 version = '0.0.1'
-dependencies = [
-    "numpy",
-    "pandas",
-    "pyarrow",
-    "mypy",
-    "ruff",
-    "tabulate",
-    "gymnasium",
-]
 requires-python = ">=3.11"
 authors = [
     {name = 'Niklas Weber'}
