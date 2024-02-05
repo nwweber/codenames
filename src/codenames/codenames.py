@@ -11,6 +11,7 @@ from typing import List, TypeAlias
 
 import gymnasium
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import tabulate
 from pandas import DataFrame
@@ -82,9 +83,15 @@ def strikethrough(text: str) -> str:
 
 
 class CardType(enum.Enum):
-    AGENT = "agent"
-    NEUTRAL = "neutral"
-    ASSASSIN = "assassin"
+    AGENT = 1, "agent"
+    NEUTRAL = 2, "neutral"
+    ASSASSIN = 3, "assassin"
+
+    def to_str(self) -> str:
+        return self.value[1]
+
+    def to_int(self) -> int:
+        return self.value[0]
 
 
 @dataclasses.dataclass
@@ -300,7 +307,7 @@ class GameState:
     """
 
     board: Board
-    turn_count: int = 1
+    current_turn_count: int = 1
     max_turn_count: int = 9
     current_hint: Hint | None = None
     consecutive_guesses: int = 1
@@ -309,7 +316,7 @@ class GameState:
 BoardIndex: typing.TypeAlias = int
 
 
-ObsType = ...
+ObsType = npt.NDArray[np.int64]
 ActionType = np.int64
 
 
@@ -320,14 +327,32 @@ class CodenamesGuesserEnv(gymnasium.Env[ObsType, ActionType]):
 
     metadata = {"render_mode": ["human"]}
 
-    def __init__(self, words: list[str]) -> None:
+    def __init__(self, card_words: list[str]) -> None:
         # 25 cards on the board, 1 action for 'yield'
         # -1 = yield, 0 .. 24 = index of card on board
-        self.action_space = gymnasium.spaces.Discrete(n=26, start=-1)
+        self.action_space = gymnasium.spaces.Discrete(n=25, start=0)
         # TODO change me to actual observation space
         # this will likely be tricky and need iteration
+        # obs space = [
+        #   (future: likely make these embeddings not indices)
+        #   vocab indices of board words (25 integers, low=0, high=len(card_words)-1,
+        #   card types for revealed cards, -1 otherwise (25 integers, low=-1, high=max(integer values of CardType enum)),
+        #   is_observed for cards (25 integers, low=0, high=1)
+        #   current turn count (1 integer, low=1, high=max turn count)
+        #   max turn count (1 integer, low=max turn count, high=max turn count -> static -> remove from obs?)
+        #   consecutive guesses (1 integer, low=0, high=???)
+        #   current hint, number (1 integer, low=1, high=25?)
+        #   current hint, word index (1 integer, same bounds as other vocab indices)
+        self.observation_space = gymnasium.spaces.Box(
+            low=[],
+            high=[],
+            dtype=np.int64,
+        )
         self.observation_space = gymnasium.spaces.Box(low=0, high=1)
-        self._words = words
+        self._words = card_words
+        self._card_word_to_int: dict[str, int] = {
+            word: i for i, word in enumerate(card_words)
+        }
         self._gamestate: GameState | None = None
 
     def reset(
@@ -377,7 +402,7 @@ class CodenamesGuesserEnv(gymnasium.Env[ObsType, ActionType]):
         truncated = False
         info: dict[str, typing.Any] = {}
 
-        if self._gamestate.turn_count > self._gamestate.max_turn_count:
+        if self._gamestate.current_turn_count > self._gamestate.max_turn_count:
             reward -= 15
             terminated = True
             return (
@@ -410,41 +435,52 @@ class CodenamesGuesserEnv(gymnasium.Env[ObsType, ActionType]):
 
         # generic state updates
         guessed_card.is_played = True
-        self._gamestate.turn_count += 1
+        self._gamestate.current_turn_count += 1
         # state updates end
 
         new_observation = self._state_to_obs(self._gamestate)
 
         return new_observation, reward, terminated, truncated, info
 
-    @staticmethod
-    def _state_to_obs(gamestate: GameState) -> typing.Any:
+    def _state_to_obs(self, gamestate: GameState) -> typing.Any:
         """
         Construct an observation from current state.
         """
         # this is a dummy implementation, first need to understand how to structure
         # input well for RL agent
-        obs: list[typing.Any] = []
-
 
         # output could look like:
         # [int(word1), int(word2), ..., int(card_type1), int(card_type2 if card is played, sentinel otherwise), ..., int(is_played_n), ..., turn_count, max_turn_count, consecutive_guesses
+
+        # True if reset() has been called
+        assert isinstance(gamestate.current_hint, Hint)
 
         n_cards = len(gamestate.board.cards)
         word_encodings = np.zeros(n_cards, dtype=np.int64)
         revealed_card_types = np.zeros(n_cards, dtype=np.int64)
         cards_played_indicator = np.zeros(n_cards, dtype=np.int64)
         for i, card in enumerate(gamestate.board.cards):
-            word_encodings[i] = encode_word(card.word)
-            revealed_card_types[i] = 
+            word_encodings[i] = self._card_word_to_int[card.word]
+            revealed_card_types[i] = card.type.to_int() if card.is_played else -1
             cards_played_indicator[i] = int(card.is_played)
 
+        other_features = np.zeros(6, dtype=np.int64)
+        other_features[0] = gamestate.current_turn_count
+        other_features[1] = gamestate.max_turn_count
+        other_features[3] = gamestate.consecutive_guesses
+        other_features[4] = gamestate.current_hint.number
+        other_features[5] = self._card_word_to_int[gamestate.current_hint.word]
 
-        obs.extend(gamestate.board.cards)
-        obs.extend(
-            [gamestate.current_hint, gamestate.turn_count, gamestate.max_turn_count]
+        obs_vector: npt.NDArray[np.int64] = np.concatenate(
+            [
+                word_encodings,
+                revealed_card_types,
+                cards_played_indicator,
+                other_features,
+            ], dtype=np.int64
         )
-        return obs
+
+        return obs_vector
 
     @staticmethod
     def _get_hint() -> Hint:
@@ -452,7 +488,7 @@ class CodenamesGuesserEnv(gymnasium.Env[ObsType, ActionType]):
         Elicit hint from spymaster.
         """
         # bootstrapping: hard-coded to see if rest of code runs
-        return Hint("bob", 2)
+        return Hint("space", 2)
 
     def _get_guess(self, gamestate: GameState) -> BoardIndex:
         """
@@ -479,9 +515,11 @@ def main() -> None:
     # game = CodeNamesGame(spymaster=Spymaster(), guesser=Guesser(), board=board)
     # game.play()
 
-    env = CodenamesGuesserEnv(words=codenames_words)
-    env.reset()
+    env = CodenamesGuesserEnv(card_words=codenames_words)
+    vals = env.reset()
+    print(vals)
     from gymnasium.utils import env_checker
+
     env_checker.check_env(env)
     # # env._state_to_obs(env._gamestate)
     # env._get_guess(env._gamestate)
