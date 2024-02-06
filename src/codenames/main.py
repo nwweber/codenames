@@ -1,9 +1,11 @@
 """
 Let's play some Codenames :)
 """
+import stable_baselines3
 import csv
 import dataclasses
 import enum
+import itertools
 import sys
 import typing
 from pathlib import Path
@@ -325,9 +327,9 @@ class CodenamesGuesserEnv(gymnasium.Env[ObsType, ActionType]):
     A Gymnasium Env in which the Guesser is an RL agent.
     """
 
-    metadata = {"render_mode": ["human"]}
+    metadata = {"render_modes": ["ansi"]}
 
-    def __init__(self, card_words: list[str]) -> None:
+    def __init__(self, card_words: list[str], render_mode: str = None) -> None:
         # 25 cards on the board, 1 action for 'yield'
         # -1 = yield, 0 .. 24 = index of card on board
         self.action_space = gymnasium.spaces.Discrete(n=25, start=0)
@@ -336,19 +338,67 @@ class CodenamesGuesserEnv(gymnasium.Env[ObsType, ActionType]):
         # obs space = [
         #   (future: likely make these embeddings not indices)
         #   vocab indices of board words (25 integers, low=0, high=len(card_words)-1,
-        #   card types for revealed cards, -1 otherwise (25 integers, low=-1, high=max(integer values of CardType enum)),
+        n_cards = 25
+        word_indices_low: list[int] = [0] * n_cards
+        max_vocab_index = len(card_words) - 1
+        word_indices_high: list[int] = [max_vocab_index] * n_cards
+        #   card types for revealed cards, 0 otherwise (25 integers, low=0, high=max(integer values of CardType enum)),
+        card_types_low: list[int] = [0] * n_cards
+        card_types_high: list[int] = [
+            max([card_type.to_int() for card_type in CardType])
+        ] * n_cards
         #   is_observed for cards (25 integers, low=0, high=1)
+        is_observed_low: list[int] = [0] * n_cards
+        is_observed_high: list[int] = [1] * n_cards
         #   current turn count (1 integer, low=1, high=max turn count)
+        current_turn_count_low: list[int] = [1]
+        current_turn_count_high: list[int] = [9]  # max turn count
         #   max turn count (1 integer, low=max turn count, high=max turn count -> static -> remove from obs?)
+        max_turn_count_low: list[int] = [9]
+        max_turn_count_high = max_turn_count_low
         #   consecutive guesses (1 integer, low=0, high=???)
+        consecutive_guesses_low: list[int] = [0]
+        consecutive_guesses_high: list[int] = [25]
         #   current hint, number (1 integer, low=1, high=25?)
+        current_hint_nr_low: list[int] = [1]
+        current_hint_nr_high: list[int] = [25]
         #   current hint, word index (1 integer, same bounds as other vocab indices)
-        self.observation_space = gymnasium.spaces.Box(
-            low=[],
-            high=[],
+        current_hint_word_low: list[int] = [0]
+        current_hint_word_high: list[int] = [max_vocab_index]
+
+        all_low: npt.NDArray[np.int64] = np.asarray(
+            list(itertools.chain(
+                word_indices_low,
+                card_types_low,
+                is_observed_low,
+                current_turn_count_low,
+                max_turn_count_low,
+                consecutive_guesses_low,
+                current_hint_nr_low,
+                current_hint_word_low,
+            )),
             dtype=np.int64,
         )
-        self.observation_space = gymnasium.spaces.Box(low=0, high=1)
+
+        all_high: npt.NDArray[np.int64] = np.asarray(
+            list(itertools.chain(
+                word_indices_high,
+                card_types_high,
+                is_observed_high,
+                current_turn_count_high,
+                max_turn_count_high,
+                consecutive_guesses_high,
+                current_hint_nr_high,
+                current_hint_word_high,
+            )),
+            dtype=np.int64,
+        )
+
+        self.observation_space = gymnasium.spaces.Box(
+            low=all_low,
+            high=all_high,
+            dtype=np.int64,
+        )
         self._words = card_words
         self._card_word_to_int: dict[str, int] = {
             word: i for i, word in enumerate(card_words)
@@ -461,15 +511,15 @@ class CodenamesGuesserEnv(gymnasium.Env[ObsType, ActionType]):
         cards_played_indicator = np.zeros(n_cards, dtype=np.int64)
         for i, card in enumerate(gamestate.board.cards):
             word_encodings[i] = self._card_word_to_int[card.word]
-            revealed_card_types[i] = card.type.to_int() if card.is_played else -1
+            revealed_card_types[i] = card.type.to_int() if card.is_played else 0
             cards_played_indicator[i] = int(card.is_played)
 
-        other_features = np.zeros(6, dtype=np.int64)
+        other_features = np.zeros(5, dtype=np.int64)
         other_features[0] = gamestate.current_turn_count
         other_features[1] = gamestate.max_turn_count
-        other_features[3] = gamestate.consecutive_guesses
-        other_features[4] = gamestate.current_hint.number
-        other_features[5] = self._card_word_to_int[gamestate.current_hint.word]
+        other_features[2] = gamestate.consecutive_guesses
+        other_features[3] = gamestate.current_hint.number
+        other_features[4] = self._card_word_to_int[gamestate.current_hint.word]
 
         obs_vector: npt.NDArray[np.int64] = np.concatenate(
             [
@@ -477,7 +527,8 @@ class CodenamesGuesserEnv(gymnasium.Env[ObsType, ActionType]):
                 revealed_card_types,
                 cards_played_indicator,
                 other_features,
-            ], dtype=np.int64
+            ],
+            dtype=np.int64,
         )
 
         return obs_vector
@@ -501,8 +552,16 @@ class CodenamesGuesserEnv(gymnasium.Env[ObsType, ActionType]):
         playable_indices: list[BoardIndex] = gamestate.board.get_playable_indices()
         return int(self.np_random.choice(playable_indices, size=1)[0])
 
+    from gymnasium.core import RenderFrame
+
+    def render(self) -> RenderFrame | list[RenderFrame] | None:
+        self._gamestate.board.display()
+        return
+
 
 def main() -> None:
+    import sys
+    print('path:', sys.path)
     codenames_wordlist_path = (
         Path(__file__)
         .parent.parent.parent.joinpath("data")
@@ -515,17 +574,33 @@ def main() -> None:
     # game = CodeNamesGame(spymaster=Spymaster(), guesser=Guesser(), board=board)
     # game.play()
 
-    env = CodenamesGuesserEnv(card_words=codenames_words)
-    vals = env.reset()
-    print(vals)
+    # env = CodenamesGuesserEnv(card_words=codenames_words)
+    # vals = env.reset()
+    # print(vals)
     from gymnasium.utils import env_checker
 
-    env_checker.check_env(env)
+    gymnasium.register(
+        'codenames_guesser',
+        entry_point="codenames.main:CodenamesGuesserEnv",
+        max_episode_steps=50,
+    )
+    env = gymnasium.make(
+        'codenames_guesser',
+        card_words=codenames_words,
+        render_mode='ansi',
+    )
+    # env_checker.check_env(env.unwrapped)
     # # env._state_to_obs(env._gamestate)
     # env._get_guess(env._gamestate)
     # env.step(0)
 
-    print("hi")
+    dqn = stable_baselines3.DQN(
+        policy='MlpPolicy',
+        env=env,
+        verbose=1,
+    )
+
+    dqn.learn(total_timesteps=100, log_interval=10)
 
 
 if __name__ == "__main__" and not is_interactive_py_session():
